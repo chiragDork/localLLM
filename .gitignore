@@ -1,3 +1,4 @@
 echo ".streamlit:secrets.toml" >> .gitignore
 .streamlit:secrets.toml
 .streamlit/secrets.toml
+.streamlit/secrets.toml
