@@ -86,7 +86,8 @@ if st.button("Submit"):
         validation_feedback = validate_prompt_with_local(query, LOCAL_MODEL, user_local_url)
         st.info(f"📝 Local Model Review:\n\n{validation_feedback}")
 
-    if "no" in validation_feedback.lower():
+    first_line = validation_feedback.strip().split("\n")[0].lower()
+    if first_line.startswith("no"):
         st.error("🚫 Local model flagged this prompt as unsafe for cloud.")
         st.stop()
 
