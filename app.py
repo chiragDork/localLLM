@@ -1,15 +1,14 @@
 import streamlit as st
-from openai import OpenAI
-import subprocess
+import requests
 import json
 from datetime import datetime
+from openai import OpenAI
 
 # --- OpenAI Client ---
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-  # Replace with your actual key
 
-# --- Local validation of user prompt (Advanced) ---
-def validate_prompt_with_local(prompt, model):
+# --- Local validation of user prompt ---
+def validate_prompt_with_local(prompt, model, base_url):
     check_prompt = (
         f"You are a data compliance assistant.\n"
         f"Does the following prompt contain any PII, PHI, confidential, proprietary, or internal information? "
@@ -17,16 +16,24 @@ def validate_prompt_with_local(prompt, model):
         f"Prompt:\n{prompt}"
     )
     try:
-        result = subprocess.run(['ollama', 'run', model], input=check_prompt.encode(), stdout=subprocess.PIPE)
-        return result.stdout.decode().strip()
+        response = requests.post(f"{base_url}/api/generate", json={
+            "model": model,
+            "prompt": check_prompt,
+            "stream": False
+        }, timeout=60)
+        return response.json().get("response", "[No response from local model]")
     except Exception as e:
         return f"[Local validation error: {e}]"
 
 # --- Validate cloud response locally ---
-def ask_local(prompt, model_name):
+def ask_local(prompt, model, base_url):
     try:
-        result = subprocess.run(['ollama', 'run', model_name], input=prompt.encode(), stdout=subprocess.PIPE)
-        return result.stdout.decode().strip()
+        response = requests.post(f"{base_url}/api/generate", json={
+            "model": model,
+            "prompt": prompt,
+            "stream": False
+        }, timeout=60)
+        return response.json().get("response", "[No response from local model]")
     except Exception as e:
         return f"[Error calling local LLM: {e}]"
 
@@ -57,34 +64,26 @@ st.set_page_config(page_title="Hybrid LLM Assistant", layout="centered")
 st.title("🔐 Hybrid LLM Assistant")
 st.caption("Prompt is reviewed by a local model before being sent to the cloud.")
 
-query = st.text_input("💬 Ask a question (no sensitive info):")
-
 # Local model config
+user_local_url = st.text_input("🖥️ Enter your local model's base URL (e.g., http://localhost:11434 or ngrok HTTPS URL):")
 available_models = ["mistral", "llama3", "phi3", "custom"]
-model_choice = st.selectbox("🧠 Choose your local model (used for pre-check and validation):", available_models)
+model_choice = st.selectbox("🧠 Choose your local model:", available_models)
 LOCAL_MODEL = model_choice if model_choice != "custom" else st.text_input("Custom model name (e.g. my-model):")
 
-# Model availability check
-if LOCAL_MODEL:
-    try:
-        result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
-        if LOCAL_MODEL not in result.stdout:
-            st.warning(f"⚠️ Model '{LOCAL_MODEL}' not installed.")
-            st.code(f"ollama pull {LOCAL_MODEL}", language="bash")
-            st.stop()
-    except Exception as e:
-        st.error(f"⚠️ Model check failed: {str(e)}")
-        st.stop()
+query = st.text_input("💬 Ask a question (no sensitive info):")
 
 # Submit
 if st.button("Submit"):
-    if query.strip() == "":
+    if not query.strip():
         st.warning("Please enter a question.")
+        st.stop()
+    if not user_local_url or not LOCAL_MODEL:
+        st.warning("Please enter both model name and local model URL.")
         st.stop()
 
     # Step 1: Ask local model to approve prompt
     with st.spinner("🧠 Validating prompt using local LLM..."):
-        validation_feedback = validate_prompt_with_local(query, LOCAL_MODEL)
+        validation_feedback = validate_prompt_with_local(query, LOCAL_MODEL, user_local_url)
         st.info(f"📝 Local Model Review:\n\n{validation_feedback}")
 
     if "no" in validation_feedback.lower():
@@ -102,7 +101,7 @@ if st.button("Submit"):
             f"{cloud_response}\n\n"
             f"Is it accurate, compliant, and free of hallucinations or misstatements?"
         )
-        local_review = ask_local(review_prompt, LOCAL_MODEL)
+        local_review = ask_local(review_prompt, LOCAL_MODEL, user_local_url)
 
     # Show results
     st.subheader("🌐 Cloud Response")
